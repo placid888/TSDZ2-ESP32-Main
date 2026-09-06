@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'  # 關鍵修正：確保把 owb 等外部傳感器子模組抓下來
+          submodules: 'recursive'
 
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
