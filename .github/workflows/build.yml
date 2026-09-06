@@ -18,7 +18,7 @@ path: '.'
 uses: actions/upload-artifact@v3
 with:
 name: TSDZ2-Firmware-BIN
-path: |
+path: 
 build/bootloader/bootloader.bin
 build/partition_table/partition-table.bin
 build/*.bin
