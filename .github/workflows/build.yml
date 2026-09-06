@@ -12,10 +12,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'  # 關鍵修正：確保把 owb 等外部傳感器子模組抓下來
 
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v4.4  # 降級到 v4.4 穩定版，避開嚴格的格式化語法檢查
+          esp_idf_version: v4.4
           target: esp32
           path: '.'

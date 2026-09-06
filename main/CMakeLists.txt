@@ -16,3 +16,26 @@ idf_component_register(
         spi_flash         # 快閃記憶體操作
         esp_http_client   # 新增：解決 esp_http_client.h 找不到的問題
 )
+name: TSDZ2 ESP32 Build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'  # 關鍵修正：確保把 owb 等外部傳感器子模組抓下來
+
+      - name: Build with ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v4.4
+          target: esp32
+          path: '.'
