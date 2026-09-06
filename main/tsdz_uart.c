@@ -3,6 +3,7 @@
  *
  *  Created on: 2 set 2019
  *      Author: Max
+ *  Modified for Felt eMTB: UART Pins Hardcoded to GPIO 16/17
  */
 #define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
 
@@ -17,7 +18,6 @@
 #include "tsdz_uart.h"
 #include "tsdz_utils.h"
 #include "tsdz_ota_stm8.h"
-
 
 static const char *TAG = "tsdz_uart";
 
@@ -37,12 +37,15 @@ static TickType_t last_read_ct_tick = 0;
 static TickType_t last_send_lcd_tick = pdMS_TO_TICKS(20);
 static TickType_t last_send_ct_tick = pdMS_TO_TICKS(40);
 
+// ==============================================================================
+// 【宣告區】
+// ==============================================================================
 bool lcdMessageReceived(void);
 bool ctMessageReceived(void);
 bool checkCRC(uint8_t *message, uint8_t count);
 bool checkCRC16(uint8_t *message, uint8_t count);
 char* bytesToHex(uint8_t* bytes, uint8_t n);
-
+// ==============================================================================
 
 void tsdz_uart_init(void) {
 
@@ -57,12 +60,17 @@ void tsdz_uart_init(void) {
     };
 
     esp_err_t err;
+    
+    // ==============================================================================
+    // 1. 原廠實體儀表 (LCD_UART) 設定區
+    // ==============================================================================
     err = uart_param_config(LCD_UART, &uart_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "uart_param_config LCD_UART error=%d", err);
     }
 
-    err = uart_set_pin(LCD_UART, LCD_RX_PIN, LCD_TX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    // [腳位封印]：把沒在用的螢幕綁定到 GPIO 32 與 33
+    err = uart_set_pin(LCD_UART, 32, 33, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "uart_set_pin LCD_UART error=%d", err);
     }
@@ -71,11 +79,16 @@ void tsdz_uart_init(void) {
         ESP_LOGE(TAG, "uart_driver_install LCD_UART error=%d", err);
     }
 
+    // ==============================================================================
+    // 2. 馬達控制器 (CT_UART) 設定區 (與 TSDZ2 對接的命脈)
+    // ==============================================================================
     err = uart_param_config(CT_UART, &uart_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "uart_param_config CT_UART error=%d", err);
     }
-    err = uart_set_pin(CT_UART, CT_RX_PIN, CT_TX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    
+    // [腳位修改]：RX=16, TX=17 (硬體接線：ESP32 16接馬達TX；17接馬達RX)
+    err = uart_set_pin(CT_UART, 16, 17, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "uart_set_pin CT_UART error=%d", err);
     }
@@ -85,13 +98,11 @@ void tsdz_uart_init(void) {
     }
 }
 
-// the OEM LCD sends about 13 msg/sec but the messages to the controller
-// are sent at a frequency of 10 msg/sec like the official LCD3
+// ---------------------------------------------------------
+// 下方程式碼皆為原廠通訊邏輯，保持原封不動
+// ---------------------------------------------------------
 void tsdz_uart_task(void) {
-    // Verify if STM8 Controller OTA should be started
-    // OTA flag should be sent two consecutive times to the controller
     if (stm8_ota_status > 2) {
-        // wait end of transmission of last controller message
         esp_err_t err = uart_wait_tx_done(CT_UART,  pdMS_TO_TICKS(100));
         if (err == ESP_OK) {
             ESP_LOGI(TAG,"STM8 OTA Start!");
@@ -104,12 +115,10 @@ void tsdz_uart_task(void) {
 	
 	TickType_t current_tick = xTaskGetTickCount();
     
-	// Read messages coming from LCD and send to Controller
     if (lcdMessageReceived()) {
     	if (checkCRC(lcd_recived_msg, LCD_OEM_MSG_BYTES)) {
     		ESP_LOGD(TAG, "LCD Received: %s", bytesToHex(lcd_recived_msg,LCD_OEM_MSG_BYTES));
 	        processLcdMessage(lcd_recived_msg);
-			// Send a message to the controller as soon as a valid message is received from the LCD
             getControllerMessage(ct_send_msg);
             uart_write_bytes(CT_UART, (char*)ct_send_msg, (size_t)LCD_OS_MSG_BYTES);
 	        last_read_lcd_tick = current_tick;
@@ -119,20 +128,16 @@ void tsdz_uart_task(void) {
 	        tsdz_data.ui8_rxl_errors++;
 		}
     }
-	// Send a message to the Controller even if no valid messages are received from the LCD
 	if ((current_tick - last_send_ct_tick) > pdMS_TO_TICKS(100)) {
 		getControllerMessage(ct_send_msg);
 		uart_write_bytes(CT_UART, (char*)ct_send_msg, (size_t)LCD_OS_MSG_BYTES);
 		last_send_ct_tick = current_tick;
-		//ESP_LOGI(TAG, "Controller Message Sent: %s", bytesToHex(ct_send_msg,LCD_OS_MSG_BYTES));
 	}
 
-    // Read messages from Controller and send to LCD
     if (ctMessageReceived()) {
         if (checkCRC16(ct_received_msg, CT_OS_MSG_BYTES)) {
             ESP_LOGD(TAG, "CT Received: %s", bytesToHex(ct_received_msg,CT_OS_MSG_BYTES));
             processControllerMessage(ct_received_msg);
-			// Send a message to the LCD as soon as a valid message is received from the Controller
             getLCDMessage(lcd_send_msg);
             uart_write_bytes(LCD_UART, (char*)lcd_send_msg, (size_t)CT_OEM_MSG_BYTES);
 	        last_read_ct_tick = current_tick;
@@ -142,15 +147,12 @@ void tsdz_uart_task(void) {
             tsdz_data.ui8_rxc_errors++;
         }
     }
-	// Send a message to the LCD even if no valid messages are received from the controller
 	if ((current_tick - last_send_lcd_tick) > pdMS_TO_TICKS(100)) {
 		getLCDMessage(lcd_send_msg);
 		uart_write_bytes(LCD_UART, (char*)lcd_send_msg, (size_t)CT_OEM_MSG_BYTES);
 		last_send_lcd_tick = current_tick;
-		//ESP_LOGI(TAG, "LCD Message Sent: %s", bytesToHex(lcd_send_msg,CT_OEM_MSG_BYTES));
 	}
 	
-    // Update Communication status bits of tsdz_data.ui8_system_state
     if ((current_tick - last_read_ct_tick) > pdMS_TO_TICKS(500))
         tsdz_data.ui8_system_state |= ERROR_CONTROLLER_COMMUNICATION;
     else
@@ -166,15 +168,13 @@ bool lcdMessageReceived(void) {
     size_t available;
     int received;
 
-    //uart_get_buffered_data_len(UART_NUM_0, &available);
     uart_get_buffered_data_len(LCD_UART, &available);
     while (available > 0) {
-        // received = uart_read_bytes(UART_NUM_0, byte_received, 1, 0);
         received = uart_read_bytes(LCD_UART, &byte_received, 1, 0);
         if (received > 0)
             switch (lcd_state_machine) {
 				case 0:
-					if (byte_received != LCD_MSG_ID) // see if we get start package byte
+					if (byte_received != LCD_MSG_ID)
 						break;
 					lcd_rx_counter = 1;
 					lcd_state_machine = 1;
@@ -182,10 +182,7 @@ bool lcdMessageReceived(void) {
 					break;
 
 				case 1:
-					// save received byte and increment index for next byte
 					lcd_recived_msg[lcd_rx_counter++] = byte_received;
-
-					// reset if it is the last byte of the package and index is out of bounds
 					if (lcd_rx_counter >= LCD_OEM_MSG_BYTES) {
 						lcd_state_machine = 0;
 						lcd_rx_counter = 0;
@@ -217,10 +214,7 @@ bool ctMessageReceived(void) {
 					ct_received_msg[0] = byte_received;
 					break;
 				case 1:
-					// save received byte and increment index for next byte
 					ct_received_msg[ct_rx_counter++] = byte_received;
-
-					// reset if it is the last byte of the package and index is out of bounds
 					if (ct_rx_counter >= CT_OS_MSG_BYTES) {
 						ct_state_machine = 0;
 						ct_rx_counter = 0;
@@ -233,7 +227,6 @@ bool ctMessageReceived(void) {
     return false;
 }
 
-// return true if the crc8 of the message is correct
 bool checkCRC(uint8_t *message, uint8_t count) {
     if (crc8(message, count - 1) == message[count - 1])
         return true;
@@ -249,7 +242,6 @@ bool checkCRC16(uint8_t *message, uint8_t count) {
         crc16 (message[ui8_i], &ui16_crc_rx);
     }
 
-    // if CRC is ok read the package
     if (((((uint16_t) message [count - 1]) << 8) + ((uint16_t) message [count - 2])) == ui16_crc_rx)
         return true;
     else
@@ -268,4 +260,3 @@ char* bytesToHex(uint8_t* bytes, uint8_t n) {
     sb[i++] = 0;
     return sb;
 }
-
