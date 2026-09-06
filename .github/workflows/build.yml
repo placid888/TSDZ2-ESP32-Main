@@ -21,3 +21,14 @@ jobs:
           esp_idf_version: v4.4
           target: esp32
           path: '.'
+
+      - name: Upload Firmware Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TSDZ2-ESP32-Firmware
+          path: |
+            build/*.bin
+            build/bootloader/*.bin
+            build/partition_table/*.bin
+            build/flasher_args.json
+          retention-days: 7
