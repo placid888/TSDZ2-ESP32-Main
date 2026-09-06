@@ -1,24 +1,41 @@
-name: ESP-IDF Build
+name: Build TSDZ2 ESP32 Firmware
+
 on:
   push:
-    branches: [ "*" ]
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 使用官方 ESP-IDF v4.4 容器，避免環境配置地雷
+    container: espressif/idf:release-v4.4
+
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
-    - name: Build with ESP-IDF
-      uses: espressif/esp-idf-ci-action@v1
-      with:
-        esp_idf_version: v4.4
-        target: esp32
-        path: '.'
-    - name: Upload Firmware Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: TSDZ2-Firmware-BIN
-        path: |
-          build/bootloader/bootloader.bin
-          build/partition_table/partition-table.bin
-          build/*.bin
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Build ESP32 Firmware
+        run: |
+          # 載入 ESP-IDF 環境變數
+          . $IDF_PATH/export.sh
+          
+          # 設定目標晶片為 ESP32 (若使用 S2/S3/C3 請自行修改)
+          idf.py set-target esp32
+          
+          # 執行編譯
+          idf.py build
+
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-tsdz2-binaries
+          # 集中打包所有燒錄所需的 bin 檔與參數配置
+          path: |
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
+            build/*.bin
+            build/flasher_args.json
