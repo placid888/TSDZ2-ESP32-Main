@@ -1,0 +1,28 @@
+name: ESP-IDF Build
+當有任何程式碼 push 到 GitHub 時，自動觸發此流程
+on:
+push:
+branches: [ "*" ]
+jobs:
+build:
+runs-on: ubuntu-latest
+steps:
+# 1. 抓取你的最新程式碼
+- name: Checkout Code
+uses: actions/checkout@v3
+# 2. 使用官方 ESP-IDF v4.4 版本進行編譯 (完美相容舊專案)
+- name: Build with ESP-IDF
+uses: espressif/esp-idf-ci-action@v1
+with:
+esp_idf_version: v4.4
+target: esp32
+path: '.'
+# 3. 把編譯出來的燒錄檔打包，讓你可以在網頁上下載
+- name: Upload Firmware Artifacts
+uses: actions/upload-artifact@v3
+with:
+name: TSDZ2-Firmware-BIN
+path: |
+build/bootloader/bootloader.bin
+build/partition_table/partition-table.bin
+build/*.bin
