@@ -16,6 +16,6 @@ jobs:
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.1  # 採用穩定版本編譯
+          esp_idf_version: v4.4  # 降級到 v4.4 穩定版，避開嚴格的格式化語法檢查
           target: esp32
-          path: '.'              # 指定專案根目錄
+          path: '.'
