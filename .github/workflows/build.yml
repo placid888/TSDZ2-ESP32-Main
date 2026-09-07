@@ -1,6 +1,8 @@
 name: Build ESP32 Firmware
 
 on:
+  push:
+    branches: [ master, main ]
   workflow_dispatch:
 
 jobs:
