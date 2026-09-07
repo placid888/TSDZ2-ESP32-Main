@@ -15,8 +15,15 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Clean Cache Before Build
-        run: rm -f sdkconfig sdkconfig.old build/CMakeCache.txt
+      - name: Force ESP32-S3 Bluetooth Config
+        run: |
+          rm -f sdkconfig
+          echo "CONFIG_BT_ENABLED=y" >> sdkconfig.defaults
+          echo "CONFIG_BT_BLUEDROID_ENABLED=y" >> sdkconfig.defaults
+          echo "CONFIG_BT_NIMBLE_ENABLED=n" >> sdkconfig.defaults
+          echo "CONFIG_BT_BLE_ENABLED=y" >> sdkconfig.defaults
+          echo "CONFIG_BT_GATTS_ENABLE=y" >> sdkconfig.defaults
+          echo "CONFIG_BT_GATTC_ENABLE=y" >> sdkconfig.defaults
 
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
