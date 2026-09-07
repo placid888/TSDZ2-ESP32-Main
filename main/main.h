@@ -59,7 +59,7 @@
 #define DEFAULT_MSG_SEC                 3 // (2 notification/sec)
 #define MIN_DS18B20_PIN                 3
 #define MAX_DS18B20_PIN                 31
-#define DEFAULT_DS18B20_PIN             4
+#define DEFAULT_DS18B20_PIN             4 // DS18B20 預設腳位，GPIO 4 於標準 ESP32 開發板安全可用
 
 #define STREET_MODE_LCD_MASTER      0
 #define STREET_MODE_FORCE_OFF       1
