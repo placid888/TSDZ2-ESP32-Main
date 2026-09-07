@@ -1,0 +1,35 @@
+name: Build ESP32 Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 使用 ESP-IDF 官方映像檔，v4.4 支援度最高
+    container: espressif/idf:release-v4.4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Build ESP-IDF Project
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py set-target esp32
+          idf.py build
+
+      - name: Collect Binaries
+        run: |
+          mkdir -p esp32_output
+          # 收集編譯好的 firmware, bootloader 與 partition-table
+          find build -maxdepth 1 -name "*.bin" -exec cp {} esp32_output/ \;
+          find build/bootloader -name "*.bin" -exec cp {} esp32_output/ \;
+          find build/partition_table -name "*.bin" -exec cp {} esp32_output/ \;
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-binaries
+          path: esp32_output/*.bin
