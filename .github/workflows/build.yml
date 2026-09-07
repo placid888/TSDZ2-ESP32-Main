@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 使用 ESP-IDF 官方映像檔，v4.4 支援度最高
     container: espressif/idf:release-v4.4
     steps:
       - name: Checkout code
@@ -19,15 +18,24 @@ jobs:
       - name: Enable Bluetooth and Build
         run: |
           . /opt/esp/idf/export.sh
-          idf.py set-target esp32
           
-          # 強制將藍牙與 SPP 的開啟設定寫入預設檔
+          # 1. 寫入預設檔，確保初始化時包含藍牙設定
           echo "CONFIG_BT_ENABLED=y" >> sdkconfig.defaults
-          echo "CONFIG_BTDM_CTRL_MODE_BTDM=y" >> sdkconfig.defaults
           echo "CONFIG_BT_BLUEDROID_ENABLED=y" >> sdkconfig.defaults
           echo "CONFIG_BT_CLASSIC_ENABLED=y" >> sdkconfig.defaults
           echo "CONFIG_BT_SPP_ENABLED=y" >> sdkconfig.defaults
           
+          # 2. 建立目標設定檔
+          idf.py set-target esp32
+          
+          # 3. 強制在生成的設定檔最末端覆蓋藍牙設定 (最後讀取的會生效)
+          echo "CONFIG_BT_ENABLED=y" >> sdkconfig
+          echo "CONFIG_BT_BLUEDROID_ENABLED=y" >> sdkconfig
+          echo "CONFIG_BT_CLASSIC_ENABLED=y" >> sdkconfig
+          echo "CONFIG_BT_SPP_ENABLED=y" >> sdkconfig
+          
+          # 4. 重新載入設定並開始編譯
+          idf.py reconfigure
           idf.py build
 
       - name: Collect Binaries
