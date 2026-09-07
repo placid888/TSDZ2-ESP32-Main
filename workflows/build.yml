@@ -1,0 +1,40 @@
+name: Build ESP32 Firmware
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Build PlatformIO Project
+        run: pio run
+
+      - name: Collect Binaries
+        run: |
+          mkdir -p esp32_output
+          # 尋找並複製編譯產生的主要檔案
+          find .pio/build -name "firmware.bin" -exec cp {} esp32_output/ \;
+          find .pio/build -name "bootloader.bin" -exec cp {} esp32_output/ \;
+          find .pio/build -name "partitions.bin" -exec cp {} esp32_output/ \;
+          # 尋找並複製 boot_app0.bin (若架構需要)
+          find ~/.platformio/packages/ -name "boot_app0.bin" -exec cp {} esp32_output/ \; || echo "boot_app0.bin not found"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-binaries
+          path: esp32_output/*.bin
