@@ -15,24 +15,43 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Enable Bluetooth and Build
+      - name: Setup Partitions and Build
         run: |
           . /opt/esp/idf/export.sh
           
-          # 1. 寫入預設檔，確保初始化時包含藍牙設定
+          # 動態產生大容量的 Partition Table (分割表)
+          cat << 'EOF' > partitions.csv
+          # Name,   Type, SubType, Offset,  Size, Flags
+          nvs,      data, nvs,     0x9000,  0x5000,
+          otadata,  data, ota,     0xe000,  0x2000,
+          factory,  app,  factory, 0x10000, 0x1C0000,
+          ota_0,    app,  ota_0,   0x1D0000,0x1C0000,
+          spiffs,   data, spiffs,  0x390000,0x70000,
+          EOF
+          
+          # 1. 寫入預設檔，開啟藍牙與自定義分割表
           echo "CONFIG_BT_ENABLED=y" >> sdkconfig.defaults
           echo "CONFIG_BT_BLUEDROID_ENABLED=y" >> sdkconfig.defaults
           echo "CONFIG_BT_CLASSIC_ENABLED=y" >> sdkconfig.defaults
           echo "CONFIG_BT_SPP_ENABLED=y" >> sdkconfig.defaults
+          echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> sdkconfig.defaults
+          echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"" >> sdkconfig.defaults
+          echo "CONFIG_PARTITION_TABLE_FILENAME=\"partitions.csv\"" >> sdkconfig.defaults
+          echo "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y" >> sdkconfig.defaults
           
           # 2. 建立目標設定檔
           idf.py set-target esp32
           
-          # 3. 強制在生成的設定檔最末端覆蓋藍牙設定 (最後讀取的會生效)
+          # 3. 強制覆蓋寫入設定檔最底層
           echo "CONFIG_BT_ENABLED=y" >> sdkconfig
           echo "CONFIG_BT_BLUEDROID_ENABLED=y" >> sdkconfig
           echo "CONFIG_BT_CLASSIC_ENABLED=y" >> sdkconfig
           echo "CONFIG_BT_SPP_ENABLED=y" >> sdkconfig
+          echo "CONFIG_PARTITION_TABLE_CUSTOM=y" >> sdkconfig
+          echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"partitions.csv\"" >> sdkconfig
+          echo "CONFIG_PARTITION_TABLE_FILENAME=\"partitions.csv\"" >> sdkconfig
+          echo "CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y" >> sdkconfig
+          echo "CONFIG_ESPTOOLPY_FLASHSIZE=\"4MB\"" >> sdkconfig
           
           # 4. 重新載入設定並開始編譯
           idf.py reconfigure
