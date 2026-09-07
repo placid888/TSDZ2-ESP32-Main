@@ -15,6 +15,9 @@ jobs:
         with:
           submodules: 'recursive'
 
+      - name: Clean Cache Before Build
+        run: rm -f sdkconfig sdkconfig.old build/CMakeCache.txt
+
       - name: Build with ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
