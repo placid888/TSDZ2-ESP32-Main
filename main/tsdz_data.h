@@ -119,6 +119,19 @@ typedef struct _tsdz_hall {
     volatile uint16_t ui16_hall_6;
 } struct_tsdz_hall;
 
+#pragma pack(1)
+typedef struct _jk_bms_data {
+    volatile uint16_t ui16_voltage_x100; // BMS 總電壓 (V * 100)
+    volatile int16_t  i16_current_x100;  // BMS 總電流 (A * 100，正為充電，負為放電)
+    volatile uint8_t  ui8_soc;           // 剩餘電量 (0-100%)
+    volatile uint8_t  ui8_temp_fet;      // 功率管溫度
+    volatile uint8_t  ui8_temp_bat;      // 電池組溫度
+    volatile uint16_t ui16_cell_max_mv;  // 最高單體電壓 (mV)
+    volatile uint16_t ui16_cell_min_mv;  // 最低單體電壓 (mV)
+    volatile uint16_t ui16_alarms;       // 警報代碼
+    volatile uint8_t  ui8_connected;     // 藍牙連線狀態 (0: 未連線, 1: 已連線)
+} struct_jk_bms_data;
+
 extern uint8_t bike_locked;
 
 extern const uint32_t bt_passkey;
@@ -129,6 +142,9 @@ extern struct_tsdz_data tsdz_data;
 // Hall Calibration data message
 extern uint8_t hall_calib_data_valid;
 extern struct_tsdz_hall tsdz_hall;
+
+// JK BMS data message
+extern struct_jk_bms_data jk_bms_data;
 
 extern uint8_t stm8_fw_version;
 extern uint32_t ui32_wh_x10_offset;
