@@ -39,8 +39,25 @@ static esp_ble_scan_params_t ble_scan_params = {
     .scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
 };
 
+/* BMS 數據接收緩衝區 */
+#define BMS_RX_BUF_SIZE 320
+static uint8_t bms_rx_buf[BMS_RX_BUF_SIZE];
+static uint16_t bms_rx_len = 0;
+
+/* 提前宣告 (Forward Declaration) 以解決 undeclared 錯誤 */
 void jk_bms_gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
+
+/* 數據解析函式框架 */
+static void jk_bms_parse_frame(uint8_t *data, uint16_t len) {
+    // 待硬體測試確認原始資料封包特徵後，於此處實作：
+    ESP_LOGI(TAG, "BMS Full Frame Received (Len: %d)", len);
+    
+    // 解析範例：
+    // jk_bms_data.ui16_voltage_x100 = ...;
+    // jk_bms_data.i16_current_x100 = ...;
+    // jk_bms_data.ui8_soc = ...;
+}
 
 void jk_bms_init(void) {
     ESP_LOGI(TAG, "JK BMS module initialized, registering GATTC...");
@@ -190,10 +207,20 @@ void jk_bms_gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
             break;
         }
         case ESP_GATTC_NOTIFY_EVT:
-            // 接收 BMS 回傳之十六進位數據
             if (param->notify.is_notify) {
-                ESP_LOGI(TAG, "BMS Notify Data (Len: %d):", param->notify.value_len);
-                esp_log_buffer_hex(TAG, param->notify.value, param->notify.value_len);
+                // 將接收到的短封包推入緩衝區拼接
+                if (bms_rx_len + param->notify.value_len <= BMS_RX_BUF_SIZE) {
+                    memcpy(&bms_rx_buf[bms_rx_len], param->notify.value, param->notify.value_len);
+                    bms_rx_len += param->notify.value_len;
+                } else {
+                    bms_rx_len = 0; // 緩衝區溢出，捨棄並重置
+                }
+
+                // 檢查是否已接收完單次完整資料幀 (通常 JK BMS 完整廣播幀大於 290 bytes)
+                if (bms_rx_len >= 290) {
+                    jk_bms_parse_frame(bms_rx_buf, bms_rx_len);
+                    bms_rx_len = 0; // 解析完畢，清空緩衝區等待下一幀
+                }
             }
             break;
         default:
