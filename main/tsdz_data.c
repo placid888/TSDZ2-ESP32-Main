@@ -506,4 +506,4 @@ void processControllerMessage(const uint8_t ct_os_message[]) {
             tsdz_hall.ui16_hall_3 = (((uint16_t) ct_os_message[20]) << 8) + ((uint16_t) ct_os_message[19]);
             tsdz_hall.ui16_hall_4 = (((uint16_t) ct_os_message[22]) << 8) + ((uint16_t) ct_os_message[21]);
             tsdz_hall.ui16_hall_5 = (((uint16_t) ct_os_message[24]) << 8) + ((uint16_t) ct_os_message[23]);
-            tsdz_hall.ui16_hall_6 = (((uint16_t) ct_os_message[26]) << 8) + 
+            tsdz_hall.ui16_hall_6 = (((uint16_t) ct_os_message[26]) << 8) +  
