@@ -207,7 +207,7 @@ void processLcdMessage(const uint8_t lcd_oem_message[]) {
             break;
     }
 
-  // wheel diameter
+ // wheel diameter
     ui8_oem_wheel_diameter = lcd_oem_message[3];
 
     // check if long hold down button
@@ -401,6 +401,14 @@ void processControllerMessage(const uint8_t ct_os_message[]) {
     // add voltage dropout due to battery internal resistance
     uint32_t tmp = (uint32_t)tsdz_data.ui8_battery_current_x10 * (uint32_t)tsdz_cfg.ui16_battery_pack_resistance_x1000 / (uint32_t)10;
     tsdz_data.ui16_battery_voltage_x1000 = (((uint16_t) ct_os_message[3]) << 8) + ((uint16_t) ct_os_message[2]) + (uint16_t)tmp;
+
+    // 若藍牙連線成功且電壓大於 0，將系統總電壓替換為 JK BMS 讀數 (BMS 解析度為 10mV，需乘 10 轉換為 1mV)
+    if (jk_bms_data.ui8_connected && jk_bms_data.ui16_voltage_x100 > 0) {
+        tsdz_data.ui16_battery_voltage_x1000 = jk_bms_data.ui16_voltage_x100 * 10;
+        
+        // 若需同時替換電流，亦可解除下方註解
+        // tsdz_data.ui8_battery_current_x10 = (uint8_t)(abs(jk_bms_data.i16_current_x100) / 10);
+    }
 
     // calculate battery Power filtered for Wh calculation
     uint32_t ui32_battery_power_temp_x10 = ((uint32_t) tsdz_data.ui16_battery_voltage_x1000 * tsdz_data.ui8_battery_current_x10) / 1000;
@@ -612,7 +620,6 @@ void getControllerMessage(uint8_t lcd_os_message[]) {
             // motor acceleration adjustment
             lcd_os_message[10] = tsdz_cfg.ui8_motor_acceleration;
             break;
-
 case 1:
             // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
             #ifdef DEADTIME_TEST
