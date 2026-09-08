@@ -3,6 +3,13 @@
 #include "tsdz_data.h"
 #include <string.h>
 
+/* 補齊 BLE 核心標頭檔 */
+#include "esp_bt.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gattc_api.h"
+#include "esp_bt_main.h"
+#include "esp_gatt_common_api.h"
+
 static const char *TAG = "jk_bms";
 
 // JK BMS 藍牙名稱前綴
@@ -124,7 +131,7 @@ void jk_bms_gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_
             esp_ble_gap_start_scanning(30);
             break;
         case ESP_GATTC_SEARCH_RES_EVT:
-            // 當找到任何服務時會觸發此事件，我們先將找到的 UUID 印出以供確認
+            // 當找到任何服務時會觸發此事件，先將找到的 UUID 印出以供確認
             ESP_LOGI(TAG, "Found service UUID: 0x%04x", param->search_res.srvc_id.uuid.uuid.uuid16);
             break;
         case ESP_GATTC_SEARCH_CMPL_EVT:
