@@ -69,4 +69,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: esp32-binaries
-          path: esp32_output/*.bin
+          path: esp32_output/*.bin 
