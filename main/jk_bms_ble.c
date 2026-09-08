@@ -30,6 +30,10 @@ static esp_ble_scan_params_t ble_scan_params = {
     .scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
 };
 
+/* 提前宣告 (Forward Declaration) 以解決 undeclared 錯誤 */
+void jk_bms_gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
+
 void jk_bms_init(void) {
     ESP_LOGI(TAG, "JK BMS module initialized, registering GATTC...");
     esp_err_t ret = esp_ble_gattc_register_callback(jk_bms_gattc_event_handler);
