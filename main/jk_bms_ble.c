@@ -1,3 +1,7 @@
+/*
+ * jk_bms_ble.c
+ */
+
 #include "jk_bms_ble.h"
 #include "esp_log.h"
 #include "tsdz_data.h"
@@ -50,13 +54,40 @@ void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 
 /* 數據解析函式框架 */
 static void jk_bms_parse_frame(uint8_t *data, uint16_t len) {
-    // 待硬體測試確認原始資料封包特徵後，於此處實作：
-    ESP_LOGI(TAG, "BMS Full Frame Received (Len: %d)", len);
-    
-    // 解析範例：
-    // jk_bms_data.ui16_voltage_x100 = ...;
-    // jk_bms_data.i16_current_x100 = ...;
-    // jk_bms_data.ui8_soc = ...;
+    if (len < 300) return; // 略過不完整的封包
+
+    // 尋找起始特徵碼 (以 0x55 0xAA 0xEB 0x90 為例)
+    uint16_t start_idx = 0xFFFF;
+    for (uint16_t i = 0; i < len - 4; i++) {
+        if (data[i] == 0x55 && data[i+1] == 0xAA && data[i+2] == 0xEB && data[i+3] == 0x90) {
+            start_idx = i;
+            break;
+        }
+    }
+
+    if (start_idx != 0xFFFF && (start_idx + 150) < len) {
+        // 總電壓 (V * 100) -> BMS 封包定義：4 bytes
+        uint32_t vol_raw = (data[start_idx + 118] | (data[start_idx + 119] << 8) | 
+                           (data[start_idx + 120] << 16) | (data[start_idx + 121] << 24));
+        jk_bms_data.ui16_voltage_x100 = (uint16_t)(vol_raw / 10); 
+
+        // 總電流 (A * 100) -> BMS 封包定義：4 bytes
+        int32_t cur_raw = (data[start_idx + 126] | (data[start_idx + 127] << 8) | 
+                          (data[start_idx + 128] << 16) | (data[start_idx + 129] << 24));
+        jk_bms_data.i16_current_x100 = (int16_t)(cur_raw / 10);
+
+        // 剩餘電量 SOC (0-100) -> BMS 封包定義：1 byte
+        jk_bms_data.ui8_soc = data[start_idx + 141];
+
+        ESP_LOGI(TAG, "BMS Parsed - Voltage: %.2fV, Current: %.2fA, SOC: %d%%", 
+                 (float)jk_bms_data.ui16_voltage_x100 / 100.0, 
+                 (float)jk_bms_data.i16_current_x100 / 100.0, 
+                 jk_bms_data.ui8_soc);
+    } else {
+        // 特徵碼不符時印出前 32 bytes
+        ESP_LOGW(TAG, "Unknown frame format. Hex dump of first 32 bytes:");
+        esp_log_buffer_hex(TAG, data, len > 32 ? 32 : len);
+    }
 }
 
 void jk_bms_init(void) {
