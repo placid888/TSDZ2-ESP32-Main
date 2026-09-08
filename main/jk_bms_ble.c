@@ -12,14 +12,23 @@
 
 static const char *TAG = "jk_bms";
 
-// JK BMS 藍牙名稱前綴
+/* JK BMS 標準 UUID 定義 */
+#define REMOTE_SERVICE_UUID        0xFFE0
+#define REMOTE_NOTIFY_CHAR_UUID    0xFFE1
+
 static const char remote_device_name[] = "JK-";
 static bool connect = false;
+static bool get_server = false;
 
 // 儲存連線所需的介面與 ID
 static esp_gatt_if_t jk_bms_gattc_if = ESP_GATT_IF_NONE;
 static uint16_t jk_bms_conn_id = 0;
 static esp_bd_addr_t jk_bms_remote_bda;
+
+// 儲存 BLE 服務與特徵值控制代碼
+static uint16_t jk_bms_start_handle = 0;
+static uint16_t jk_bms_end_handle = 0;
+static uint16_t jk_bms_char_handle = 0;
 
 static esp_ble_scan_params_t ble_scan_params = {
     .scan_type              = BLE_SCAN_TYPE_ACTIVE,
@@ -30,20 +39,13 @@ static esp_ble_scan_params_t ble_scan_params = {
     .scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
 };
 
-/* 提前宣告 (Forward Declaration) 以解決 undeclared 錯誤 */
 void jk_bms_gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 
 void jk_bms_init(void) {
     ESP_LOGI(TAG, "JK BMS module initialized, registering GATTC...");
-    esp_err_t ret = esp_ble_gattc_register_callback(jk_bms_gattc_event_handler);
-    if(ret){
-        ESP_LOGE(TAG, "GATTC register error, error code = %x", ret);
-    }
-    ret = esp_ble_gattc_app_register(0);
-    if (ret){
-        ESP_LOGE(TAG, "GATTC app register error, error code = %x", ret);
-    }
+    esp_ble_gattc_register_callback(jk_bms_gattc_event_handler);
+    esp_ble_gattc_app_register(0);
 }
 
 void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
@@ -54,9 +56,7 @@ void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
             break;
         }
         case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT:
-            if (param->scan_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
-                ESP_LOGE(TAG, "Scan start failed, error status = %x", param->scan_start_cmpl.status);
-            } else {
+            if (param->scan_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
                 ESP_LOGI(TAG, "Scan start success");
             }
             break;
@@ -73,9 +73,6 @@ void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
                             if (!connect) {
                                 connect = true;
                                 esp_ble_gap_stop_scanning();
-                                ESP_LOGI(TAG, "Ready to connect to JK BMS...");
-                                
-                                // 記錄目標 MAC 位址並發起連線
                                 memcpy(jk_bms_remote_bda, scan_result->scan_rst.bda, sizeof(esp_bd_addr_t));
                                 esp_ble_gattc_open(jk_bms_gattc_if, scan_result->scan_rst.bda, scan_result->scan_rst.ble_addr_type, true);
                             }
@@ -84,7 +81,6 @@ void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
                     break;
                 }
                 case ESP_GAP_SEARCH_INQ_CMPL_EVT:
-                    ESP_LOGI(TAG, "Scan complete");
                     if (!connect) {
                         esp_ble_gap_start_scanning(30); // 若未連線，重新啟動掃描
                     }
@@ -94,14 +90,6 @@ void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
             }
             break;
         }
-        case ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT:
-            if (param->scan_stop_cmpl.status != ESP_BT_STATUS_SUCCESS){
-                ESP_LOGE(TAG, "Scan stop failed, error status = %x", param->scan_stop_cmpl.status);
-            }
-            else {
-                ESP_LOGI(TAG, "Stop scan successfully");
-            }
-            break;
         default:
             break;
     }
@@ -110,40 +98,103 @@ void jk_bms_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
 void jk_bms_gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param) {
     switch (event) {
         case ESP_GATTC_REG_EVT:
-            ESP_LOGI(TAG, "GATTC register success, start configuring scan parameters");
             jk_bms_gattc_if = gattc_if;
-            esp_err_t scan_ret = esp_ble_gap_set_scan_params(&ble_scan_params);
-            if (scan_ret){
-                ESP_LOGE(TAG, "Set scan params error, error code = %x", scan_ret);
-            }
+            esp_ble_gap_set_scan_params(&ble_scan_params);
             break;
         case ESP_GATTC_CONNECT_EVT:
-            ESP_LOGI(TAG, "Connected to JK BMS, conn_id = %d", param->connect.conn_id);
+            ESP_LOGI(TAG, "Connected to JK BMS");
             jk_bms_conn_id = param->connect.conn_id;
             jk_bms_data.ui8_connected = 1;
-            
-            // 連線成功後，立即要求搜尋遠端設備的服務
+            get_server = false;
             esp_ble_gattc_search_service(gattc_if, param->connect.conn_id, NULL);
             break;
         case ESP_GATTC_DISCONNECT_EVT:
-            ESP_LOGI(TAG, "Disconnected from JK BMS, reason = 0x%x", param->disconnect.reason);
+            ESP_LOGI(TAG, "Disconnected from JK BMS");
             connect = false;
+            get_server = false;
             jk_bms_data.ui8_connected = 0;
             jk_bms_conn_id = 0;
-            
-            // 斷線後重新啟動掃描
             esp_ble_gap_start_scanning(30);
             break;
         case ESP_GATTC_SEARCH_RES_EVT:
-            // 當找到任何服務時會觸發此事件，先將找到的 UUID 印出以供確認
-            ESP_LOGI(TAG, "Found service UUID: 0x%04x", param->search_res.srvc_id.uuid.uuid.uuid16);
+            // 尋找 0xFFE0 服務
+            if (param->search_res.srvc_id.uuid.len == ESP_UUID_LEN_16 && 
+                param->search_res.srvc_id.uuid.uuid.uuid16 == REMOTE_SERVICE_UUID) {
+                get_server = true;
+                jk_bms_start_handle = param->search_res.start_handle;
+                jk_bms_end_handle = param->search_res.end_handle;
+                ESP_LOGI(TAG, "Found JK BMS Service (0xFFE0)");
+            }
             break;
         case ESP_GATTC_SEARCH_CMPL_EVT:
-            if (param->search_cmpl.status != ESP_GATT_OK) {
-                ESP_LOGE(TAG, "Service search failed, error status = %x", param->search_cmpl.status);
-                break;
+            if (get_server) {
+                esp_bt_uuid_t char_uuid;
+                char_uuid.len = ESP_UUID_LEN_16;
+                char_uuid.uuid.uuid16 = REMOTE_NOTIFY_CHAR_UUID;
+                
+                uint16_t count = 1;
+                esp_gattc_char_elem_t char_elem;
+                esp_gatt_status_t status = esp_ble_gattc_get_char_by_uuid(
+                    gattc_if,
+                    param->search_cmpl.conn_id,
+                    jk_bms_start_handle,
+                    jk_bms_end_handle,
+                    char_uuid,
+                    &char_elem,
+                    &count
+                );
+                
+                if (status == ESP_GATT_OK && count > 0) {
+                    jk_bms_char_handle = char_elem.char_handle;
+                    // 向底層註冊通知接收
+                    esp_ble_gattc_register_for_notify(gattc_if, jk_bms_remote_bda, jk_bms_char_handle);
+                    ESP_LOGI(TAG, "Registered for notify on characteristic 0xFFE1");
+                } else {
+                    ESP_LOGE(TAG, "Failed to find characteristic 0xFFE1");
+                }
             }
-            ESP_LOGI(TAG, "Service search complete.");
+            break;
+        case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+            if (param->reg_for_notify.status == ESP_GATT_OK) {
+                uint16_t count = 1;
+                esp_gattc_descr_elem_t descr_elem;
+                esp_bt_uuid_t descr_uuid;
+                descr_uuid.len = ESP_UUID_LEN_16;
+                descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+                
+                // 獲取 CCCD 描述符控制代碼
+                esp_gatt_status_t status = esp_ble_gattc_get_descr_by_char_handle(
+                    gattc_if,
+                    jk_bms_conn_id,
+                    param->reg_for_notify.handle,
+                    descr_uuid,
+                    &descr_elem,
+                    &count
+                );
+                
+                if (status == ESP_GATT_OK && count > 0) {
+                    uint8_t notify_en[2] = {0x01, 0x00};
+                    // 寫入 0x0001 啟用藍牙層級 Notification
+                    esp_ble_gattc_write_char_descr(
+                        gattc_if,
+                        jk_bms_conn_id,
+                        descr_elem.handle,
+                        sizeof(notify_en),
+                        notify_en,
+                        ESP_GATT_WRITE_TYPE_RSP,
+                        ESP_GATT_AUTH_REQ_NONE
+                    );
+                    ESP_LOGI(TAG, "Notification enabled in CCCD");
+                }
+            }
+            break;
+        }
+        case ESP_GATTC_NOTIFY_EVT:
+            // 接收 BMS 回傳之十六進位數據
+            if (param->notify.is_notify) {
+                ESP_LOGI(TAG, "BMS Notify Data (Len: %d):", param->notify.value_len);
+                esp_log_buffer_hex(TAG, param->notify.value, param->notify.value_len);
+            }
             break;
         default:
             break;
