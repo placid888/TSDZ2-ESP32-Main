@@ -28,6 +28,7 @@
 #include "tsdz_ds18b20.h"
 #include "tsdz_ota_esp32.h"
 #include "tsdz_tmp112.h"
+#include "jk_bms_ble.h"
 
 
 #define MAIN_LOOP_SLEEP_MS 20 // main loop sleep time in ms
@@ -64,6 +65,9 @@ void app_main(void)
 
     ESP_LOGI(TAG, "TMP112 init ...");
     tsdz_tmp112_init();
+
+    ESP_LOGI(TAG, "JK BMS init ...");
+    jk_bms_init();
 
     ESP_LOGI(TAG, "Init done");
 
@@ -143,4 +147,3 @@ void mainTask(void * pvParameters) {
         }
     }
 }
-
