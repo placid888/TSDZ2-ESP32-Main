@@ -12,12 +12,13 @@
 
 static const char *TAG = "jk_bms_ble";
 
+// 直接在這裡定義，徹底解決 undeclared 錯誤！
+#define JK_BMS_DEVICE_NAME_PREFIX "JK-" 
+#define JK_BMS_SERVICE_UUID        0xFFE0
+#define JK_BMS_CHAR_RX_TX_UUID     0xFFE1
+
 #define PROFILE_NUM 1
 #define PROFILE_A_APP_ID 0
-
-// JK BMS 的 UUID 定義
-#define JK_BMS_SERVICE_UUID        0xFFE0
-#define JK_BMS_CHAR_RX_TX_UUID     0xFFE1 // JK BMS 通常使用同一個特徵值進行收發
 
 static bool connect = false;
 static bool get_server = false;
@@ -39,6 +40,7 @@ static esp_bt_uuid_t notify_descr_uuid = {
     .uuid = {.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG,},
 };
 
+// 宣告回調
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
@@ -116,7 +118,6 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
             ESP_LOGE(TAG, "配置 MTU 失敗, error status = %x", param->cfg_mtu.status);
         }
         ESP_LOGI(TAG, "成功設定 MTU, size = %d", param->cfg_mtu.mtu);
-        // 尋找服務
         esp_ble_gattc_search_service(gattc_if, param->cfg_mtu.conn_id, &remote_filter_service_uuid);
         break;
 
@@ -143,14 +144,9 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                                                                      gl_profile_tab[PROFILE_A_APP_ID].service_end_handle,
                                                                      0,
                                                                      &count);
-            if (status != ESP_GATT_OK){
-                ESP_LOGE(TAG, "獲取特徵值數量失敗");
-            }
-            if (count > 0){
+            if (status == ESP_GATT_OK && count > 0){
                 char_elem_result = (esp_gattc_char_elem_t *)malloc(sizeof(esp_gattc_char_elem_t) * count);
-                if (!char_elem_result){
-                    ESP_LOGE(TAG, "記憶體分配失敗");
-                }else{
+                if (char_elem_result){
                     status = esp_ble_gattc_get_char_by_uuid( gattc_if,
                                                              p_data->search_cmpl.conn_id,
                                                              gl_profile_tab[PROFILE_A_APP_ID].service_start_handle,
@@ -158,28 +154,19 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                                                              remote_filter_char_uuid,
                                                              char_elem_result,
                                                              &count);
-                    if (status != ESP_GATT_OK){
-                        ESP_LOGE(TAG, "尋找特徵值 UUID (0xFFE1) 失敗");
-                        free(char_elem_result);
-                        char_elem_result = NULL;
-                        break;
-                    }
-                    if (count > 0 && (char_elem_result[0].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY)){
+                    if (status == ESP_GATT_OK && count > 0 && (char_elem_result[0].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY)){
                         gl_profile_tab[PROFILE_A_APP_ID].char_handle = char_elem_result[0].char_handle;
-                        // 註冊通知 (Notification)
                         esp_ble_gattc_register_for_notify (gattc_if, gl_profile_tab[PROFILE_A_APP_ID].remote_bda, char_elem_result[0].char_handle);
                     }
+                    free(char_elem_result);
                 }
-                free(char_elem_result);
             }
         }
         break;
 
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
         ESP_LOGI(TAG, "成功註冊 Notify，準備寫入 Descriptor 使其生效");
-        if (p_data->reg_for_notify.status != ESP_GATT_OK){
-            ESP_LOGE(TAG, "註冊 Notify 失敗 status %d", p_data->reg_for_notify.status);
-        }else{
+        if (p_data->reg_for_notify.status == ESP_GATT_OK){
             uint16_t count = 0;
             esp_gatt_status_t ret_status = esp_ble_gattc_get_attr_count( gattc_if,
                                                                          gl_profile_tab[PROFILE_A_APP_ID].conn_id,
@@ -188,29 +175,17 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                                                                          gl_profile_tab[PROFILE_A_APP_ID].service_end_handle,
                                                                          gl_profile_tab[PROFILE_A_APP_ID].char_handle,
                                                                          &count);
-            if (ret_status != ESP_GATT_OK){
-                ESP_LOGE(TAG, "獲取 Descriptor 數量失敗");
-            }
-            if (count > 0){
+            if (ret_status == ESP_GATT_OK && count > 0){
                 descr_elem_result = (esp_gattc_descr_elem_t *)malloc(sizeof(esp_gattc_descr_elem_t) * count);
-                if (!descr_elem_result){
-                    ESP_LOGE(TAG, "記憶體分配失敗");
-                }else{
+                if (descr_elem_result){
                     ret_status = esp_ble_gattc_get_descr_by_char_handle( gattc_if,
                                                                          gl_profile_tab[PROFILE_A_APP_ID].conn_id,
                                                                          p_data->reg_for_notify.handle,
                                                                          notify_descr_uuid,
                                                                          descr_elem_result,
                                                                          &count);
-                    if (ret_status != ESP_GATT_OK){
-                        ESP_LOGE(TAG, "尋找 Descriptor 失敗");
-                        free(descr_elem_result);
-                        descr_elem_result = NULL;
-                        break;
-                    }
-                    if (count > 0 && descr_elem_result[0].uuid.len == ESP_UUID_LEN_16 && descr_elem_result[0].uuid.uuid.uuid16 == ESP_GATT_UUID_CHAR_CLIENT_CONFIG){
+                    if (ret_status == ESP_GATT_OK && count > 0 && descr_elem_result[0].uuid.len == ESP_UUID_LEN_16 && descr_elem_result[0].uuid.uuid.uuid16 == ESP_GATT_UUID_CHAR_CLIENT_CONFIG){
                         uint16_t notify_en = 1;
-                        // 寫入 0x0001 開啟通知
                         esp_ble_gattc_write_char_descr( gattc_if,
                                                         gl_profile_tab[PROFILE_A_APP_ID].conn_id,
                                                         descr_elem_result[0].handle,
@@ -219,24 +194,23 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
                                                         ESP_GATT_WRITE_TYPE_RSP,
                                                         ESP_GATT_AUTH_REQ_NONE);
                     }
+                    free(descr_elem_result);
                 }
-                free(descr_elem_result);
             }
         }
         break;
     }
+    
     case ESP_GATTC_NOTIFY_EVT:
         ESP_LOGI(TAG, ">>> 收到 BMS 回傳數據！長度: %d 拜元", p_data->notify.value_len);
-        // 先把收到的資料以 Hex 印出來，之後我們再來寫解析邏輯
         esp_log_buffer_hex(TAG, p_data->notify.value, p_data->notify.value_len);
         break;
 
     case ESP_GATTC_WRITE_DESCR_EVT:
-        if (p_data->write.status != ESP_GATT_OK){
-            ESP_LOGE(TAG, "寫入 Descriptor 失敗 status %x", p_data->write.status);
+        if (p_data->write.status == ESP_GATT_OK){
+            ESP_LOGI(TAG, "Descriptor 寫入成功，發送請求指令！");
+            jk_bms_send_request(gattc_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle);
         }
-        ESP_LOGI(TAG, "Descriptor 寫入成功，準備發送指令要求 BMS 吐資料！");
-        jk_bms_send_request(gattc_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle);
         break;
         
     case ESP_GATTC_DISCONNECT_EVT:
@@ -259,11 +233,9 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
         break;
         
     case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT:
-        if (param->scan_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
-            ESP_LOGE(TAG, "啟動掃描失敗, 錯誤碼: %x", param->scan_start_cmpl.status);
-            break;
+        if (param->scan_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGI(TAG, "正在搜索藍牙名稱為 '%s' 的裝置...", JK_BMS_DEVICE_NAME_PREFIX);
         }
-        ESP_LOGI(TAG, "正在搜索藍牙名稱為 '%s' 的裝置...", JK_BMS_DEVICE_NAME_PREFIX);
         break;
         
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
@@ -271,14 +243,13 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
         if (scan_result->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
             uint8_t *adv_name = NULL;
             uint8_t adv_name_len = 0;
-            adv_name = esp_ble_resolve_adv_data(scan_result->scan_rst.ble_adv,
-                                                ESP_BLE_AD_TYPE_NAME_CMPL, &adv_name_len);
+            adv_name = esp_ble_resolve_adv_data(scan_result->scan_rst.ble_adv, ESP_BLE_AD_TYPE_NAME_CMPL, &adv_name_len);
             
             if (adv_name != NULL) {
                 if (strncmp((char *)adv_name, JK_BMS_DEVICE_NAME_PREFIX, strlen(JK_BMS_DEVICE_NAME_PREFIX)) == 0) {
                     if (connect == false) {
                         connect = true;
-                        ESP_LOGI(TAG, "找到目標設備: %.*s！準備停止掃描並連線", adv_name_len, adv_name);
+                        ESP_LOGI(TAG, "找到目標設備: %.*s！準備連線", adv_name_len, adv_name);
                         esp_ble_gap_stop_scanning();
                         esp_ble_gattc_open(gl_profile_tab[PROFILE_A_APP_ID].gattc_if, 
                                            scan_result->scan_rst.bda, 
@@ -296,10 +267,8 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
 
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param)
 {
-    if (event == ESP_GATTC_REG_EVT) {
-        if (param->reg.status == ESP_GATT_OK) {
-            gl_profile_tab[param->reg.app_id].gattc_if = gattc_if;
-        }
+    if (event == ESP_GATTC_REG_EVT && param->reg.status == ESP_GATT_OK) {
+        gl_profile_tab[param->reg.app_id].gattc_if = gattc_if;
     }
 
     int idx;
@@ -315,10 +284,8 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
 void jk_bms_init(void)
 {
     ESP_LOGI(TAG, "啟動 JK BMS 藍牙客戶端模組...");
-
     esp_ble_gap_register_callback(esp_gap_cb);
     esp_ble_gattc_register_callback(esp_gattc_cb);
     esp_ble_gattc_app_register(PROFILE_A_APP_ID);
-    
     esp_ble_gatt_set_local_mtu(500);
 }
