@@ -363,4 +363,4 @@ void jk_bms_init(void)
     esp_ble_gattc_register_callback(esp_gattc_cb);
     esp_ble_gattc_app_register(PROFILE_A_APP_ID);
     esp_ble_gatt_set_local_mtu(500);
-}!= 
+}
