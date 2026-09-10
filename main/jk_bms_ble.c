@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include "esp_log.h"
 #include "esp_bt.h"
 #include "esp_gap_ble_api.h"
@@ -8,11 +9,15 @@
 #include "esp_gatt_defs.h"
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "esp_spiffs.h"
 #include "jk_bms_ble.h"
 
 static const char *TAG = "jk_bms_ble";
 
-// 直接在這裡定義，徹底解決 undeclared 錯誤！
+// 藍牙與特徵值設定
 #define JK_BMS_DEVICE_NAME_PREFIX "JK-" 
 #define JK_BMS_SERVICE_UUID        0xFFE0
 #define JK_BMS_CHAR_RX_TX_UUID     0xFFE1
@@ -20,6 +25,11 @@ static const char *TAG = "jk_bms_ble";
 #define PROFILE_NUM 1
 #define PROFILE_A_APP_ID 0
 
+// LED 狀態燈設定 (多數 ESP32 開發板自帶藍燈為 GPIO 2)
+#define BLINK_GPIO 2
+
+// 系統狀態標記 (0: 掃描中, 1: 已連線, 2: 斷線/錯誤)
+static uint8_t bms_sys_state = 0; 
 static bool connect = false;
 static bool get_server = false;
 static esp_gattc_char_elem_t *char_elem_result = NULL;
@@ -40,7 +50,6 @@ static esp_bt_uuid_t notify_descr_uuid = {
     .uuid = {.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG,},
 };
 
-// 宣告回調
 static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
 static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
 static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
@@ -72,20 +81,48 @@ static esp_ble_scan_params_t ble_scan_params = {
     .scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
 };
 
+// 離線日誌寫入函數 (存入內部 Flash)
+static void write_offline_log(const char *msg) {
+    FILE* f = fopen("/spiffs/jk_log.txt", "a");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "無法開啟 SPIFFS 檔案寫入日誌");
+        return;
+    }
+    fprintf(f, "%s\n", msg);
+    fclose(f);
+}
+
+// LED 閃爍任務
+static void led_indicator_task(void *pvParameter) {
+    gpio_reset_pin(BLINK_GPIO);
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    
+    while(1) {
+        if (bms_sys_state == 1) { 
+            // 已連線：恆亮
+            gpio_set_level(BLINK_GPIO, 1);
+            vTaskDelay(pdMS_TO_TICKS(500));
+        } else if (bms_sys_state == 0) { 
+            // 掃描中：快速閃爍
+            gpio_set_level(BLINK_GPIO, 1);
+            vTaskDelay(pdMS_TO_TICKS(100));
+            gpio_set_level(BLINK_GPIO, 0);
+            vTaskDelay(pdMS_TO_TICKS(100));
+        } else { 
+            // 斷線/錯誤：慢速閃爍
+            gpio_set_level(BLINK_GPIO, 1);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            gpio_set_level(BLINK_GPIO, 0);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+}
+
 // 發送讀取 BMS 資訊的指令
 static void jk_bms_send_request(esp_gatt_if_t gattc_if, uint16_t conn_id, uint16_t char_handle)
 {
-    // JK BMS 讀取全體數據的標準指令 (讀取 Register 0x00, 長度 0x00)
     uint8_t req_data[] = {0x4E, 0x57, 0x00, 0x13, 0x00, 0x00, 0x00, 0x00, 0x06, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x68, 0x00, 0x00, 0x01, 0x29};
-    
-    esp_ble_gattc_write_char(gattc_if, 
-                             conn_id, 
-                             char_handle, 
-                             sizeof(req_data), 
-                             req_data, 
-                             ESP_GATT_WRITE_TYPE_NO_RSP, 
-                             ESP_GATT_AUTH_REQ_NONE);
-                             
+    esp_ble_gattc_write_char(gattc_if, conn_id, char_handle, sizeof(req_data), req_data, ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
     ESP_LOGI(TAG, "已發送數據請求指令給 JK BMS");
 }
 
@@ -96,11 +133,15 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     switch (event) {
     case ESP_GATTC_REG_EVT:
         ESP_LOGI(TAG, "GATTC 註冊成功, 準備開始掃描 JK BMS");
+        write_offline_log("[系統] GATTC 註冊成功, 啟動掃描");
+        bms_sys_state = 0;
         esp_ble_gap_set_scan_params(&ble_scan_params);
         break;
         
     case ESP_GATTC_CONNECT_EVT:
         ESP_LOGI(TAG, "=> 成功連接到 JK BMS！");
+        write_offline_log("[事件] 成功連接到 JK BMS");
+        bms_sys_state = 1;
         gl_profile_tab[PROFILE_A_APP_ID].conn_id = p_data->connect.conn_id;
         memcpy(gl_profile_tab[PROFILE_A_APP_ID].remote_bda, p_data->connect.remote_bda, sizeof(esp_bd_addr_t));
         esp_ble_gattc_send_mtu_req(gattc_if, p_data->connect.conn_id);
@@ -109,21 +150,17 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     case ESP_GATTC_OPEN_EVT:
         if (param->open.status != ESP_GATT_OK){
             ESP_LOGE(TAG, "GATT 連線開啟失敗, status %d", p_data->open.status);
-            break;
+            write_offline_log("[錯誤] GATT 連線開啟失敗");
+            bms_sys_state = 2;
         }
         break;
 
     case ESP_GATTC_CFG_MTU_EVT:
-        if (param->cfg_mtu.status != ESP_GATT_OK){
-            ESP_LOGE(TAG, "配置 MTU 失敗, error status = %x", param->cfg_mtu.status);
-        }
-        ESP_LOGI(TAG, "成功設定 MTU, size = %d", param->cfg_mtu.mtu);
         esp_ble_gattc_search_service(gattc_if, param->cfg_mtu.conn_id, &remote_filter_service_uuid);
         break;
 
     case ESP_GATTC_SEARCH_RES_EVT:
         if (p_data->search_res.srvc_id.uuid.len == ESP_UUID_LEN_16 && p_data->search_res.srvc_id.uuid.uuid.uuid16 == JK_BMS_SERVICE_UUID) {
-            ESP_LOGI(TAG, "找到目標服務 (Service UUID: 0xFFE0)");
             get_server = true;
             gl_profile_tab[PROFILE_A_APP_ID].service_start_handle = p_data->search_res.start_handle;
             gl_profile_tab[PROFILE_A_APP_ID].service_end_handle = p_data->search_res.end_handle;
@@ -132,7 +169,7 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
 
     case ESP_GATTC_SEARCH_CMPL_EVT:
         if (p_data->search_cmpl.status != ESP_GATT_OK){
-            ESP_LOGE(TAG, "服務搜尋失敗, status %x", p_data->search_cmpl.status);
+            write_offline_log("[錯誤] 服務搜尋失敗");
             break;
         }
         if (get_server){
@@ -165,7 +202,6 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
         break;
 
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
-        ESP_LOGI(TAG, "成功註冊 Notify，準備寫入 Descriptor 使其生效");
         if (p_data->reg_for_notify.status == ESP_GATT_OK){
             uint16_t count = 0;
             esp_gatt_status_t ret_status = esp_ble_gattc_get_attr_count( gattc_if,
@@ -202,13 +238,14 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     }
     
     case ESP_GATTC_NOTIFY_EVT:
-        ESP_LOGI(TAG, ">>> 收到 BMS 回傳數據！長度: %d 拜元", p_data->notify.value_len);
+        ESP_LOGI(TAG, ">>> 收到 BMS 回傳數據！長度: %d", p_data->notify.value_len);
         esp_log_buffer_hex(TAG, p_data->notify.value, p_data->notify.value_len);
+        // 若需將 Hex 寫入離線日誌會非常佔空間，建議僅在 Serial Monitor 顯示
         break;
 
     case ESP_GATTC_WRITE_DESCR_EVT:
         if (p_data->write.status == ESP_GATT_OK){
-            ESP_LOGI(TAG, "Descriptor 寫入成功，發送請求指令！");
+            write_offline_log("[系統] 成功訂閱通知，發送資料請求");
             jk_bms_send_request(gattc_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id, gl_profile_tab[PROFILE_A_APP_ID].char_handle);
         }
         break;
@@ -216,7 +253,9 @@ static void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_
     case ESP_GATTC_DISCONNECT_EVT:
         connect = false;
         get_server = false;
+        bms_sys_state = 2; // 斷線狀態
         ESP_LOGI(TAG, "與 JK BMS 斷開連接，重新啟動掃描...");
+        write_offline_log("[事件] 藍牙已斷線，重新啟動掃描");
         esp_ble_gap_start_scanning(30);
         break;
         
@@ -234,7 +273,7 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *par
         
     case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT:
         if (param->scan_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
-            ESP_LOGI(TAG, "正在搜索藍牙名稱為 '%s' 的裝置...", JK_BMS_DEVICE_NAME_PREFIX);
+            bms_sys_state = 0; // 掃描狀態
         }
         break;
         
@@ -284,6 +323,23 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp
 void jk_bms_init(void)
 {
     ESP_LOGI(TAG, "啟動 JK BMS 藍牙客戶端模組...");
+
+    // 1. 初始化 SPIFFS 以供離線日誌使用
+    esp_vfs_spiffs_conf_t spiffs_conf = {
+      .base_path = "/spiffs",
+      .partition_label = NULL,
+      .max_files = 5,
+      .format_if_mount_failed = true
+    };
+    esp_err_t ret = esp_vfs_spiffs_register(&spiffs_conf);
+    if (ret == ESP_OK) {
+        write_offline_log("--- 系統開機，初始化 JK BMS ---");
+    }
+
+    // 2. 啟動 LED 指示燈任務
+    xTaskCreate(&led_indicator_task, "led_task", 2048, NULL, 5, NULL);
+
+    // 3. 註冊 BLE 回調
     esp_ble_gap_register_callback(esp_gap_cb);
     esp_ble_gattc_register_callback(esp_gattc_cb);
     esp_ble_gattc_app_register(PROFILE_A_APP_ID);
