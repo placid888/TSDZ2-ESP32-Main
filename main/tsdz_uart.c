@@ -155,10 +155,12 @@ void tsdz_uart_task(void) {
         tsdz_data.ui8_system_state |= ERROR_CONTROLLER_COMMUNICATION;
     else
         tsdz_data.ui8_system_state &= ~ERROR_CONTROLLER_COMMUNICATION;
-    if ((current_tick - last_read_lcd_tick) > pdMS_TO_TICKS(500))
-        tsdz_data.ui8_system_state |= ERROR_LCD_COMMUNICATION;
-    else
-        tsdz_data.ui8_system_state &= ~ERROR_LCD_COMMUNICATION;
+    
+    // 【修改點】強制關閉 LCD 斷線錯誤判定，消除通訊錯誤彈窗
+    // if ((current_tick - last_read_lcd_tick) > pdMS_TO_TICKS(500))
+    //     tsdz_data.ui8_system_state |= ERROR_LCD_COMMUNICATION;
+    // else
+    tsdz_data.ui8_system_state &= ~ERROR_LCD_COMMUNICATION;
 }
 
 bool lcdMessageReceived(void) {
@@ -268,4 +270,3 @@ char* bytesToHex(uint8_t* bytes, uint8_t n) {
     sb[i++] = 0;
     return sb;
 }
-

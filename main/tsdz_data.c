@@ -157,8 +157,10 @@ uint32_t            ui32_wh_x10 = 0;
 uint32_t            ui32_wh_x10_offset = 0;
 uint32_t            wheel_revolutions;
 uint16_t            crank_revolutions;
-volatile uint8_t    ui8_app_street_mode = STREET_MODE_LCD_MASTER;
-volatile uint8_t    ui8_app_assist_mode = APP_ASSIST_MODE_LCD_MASTER;
+
+// 【修改點】強制關閉街道模式、強制由 APP 控制動力，捨棄 LCD 依賴
+volatile uint8_t    ui8_app_street_mode = STREET_MODE_FORCE_OFF;
+volatile uint8_t    ui8_app_assist_mode = APP_ASSIST_MODE_FORCE_POWER;
 volatile uint8_t    ui8_app_assist_parameter = 0;
 volatile uint8_t    ui8_app_rotor_angle_adj = 0;
 
@@ -845,3 +847,4 @@ void update_battery() {
                 11);
     }
 }
+    
