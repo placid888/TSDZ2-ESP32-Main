@@ -142,7 +142,7 @@
     
             // Cycling Power BT Service notification task (1 notification/sec)
            if (++cycling_power_bt_task_count >= (1000 / MAIN_LOOP_SLEEP_MS)) {
->                cycling_bt_update();
+               cycling_bt_update();
                 cycling_power_bt_task_count = 0;
             }
         }
